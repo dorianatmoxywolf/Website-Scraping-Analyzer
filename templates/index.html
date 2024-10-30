@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Website Scraping Analyzer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #3498db;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .json-key {
+            color: #59b6ec;
+        }
+        .json-string {
+            color: #98c379;
+        }
+        .json-number {
+            color: #d19a66;
+        }
+        .json-boolean {
+            color: #c678dd;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-8">
+    <div class="max-w-4xl mx-auto">
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <h1 class="text-2xl font-bold mb-6">Website Scraping Analyzer</h1>
+
+            <div class="mb-6">
+                <label for="url" class="block text-sm font-medium text-gray-700 mb-2">Website URL</label>
+                <div class="flex gap-2">
+                    <input type="text" id="url" 
+                           class="flex-1 p-2 border rounded-md" 
+                           placeholder="example.com"
+                           onkeypress="if (event.key === 'Enter') analyzeWebsite()">
+                    <button onclick="analyzeWebsite()" 
+                            id="analyzeButton"
+                            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                        Analyze
+                    </button>
+                </div>
+            </div>
+
+            <div id="loading" class="hidden p-4 text-gray-600">
+                <span class="loader"></span>
+                Analyzing website...
+            </div>
+
+            <div id="result" class="mt-4 space-y-4 hidden">
+                <div id="summary" class="p-4 rounded-md bg-gray-50 border">
+                    <h2 class="font-bold text-lg mb-2">Analysis Summary</h2>
+                    <div id="primaryDomain" class="text-gray-600"></div>
+                    <div id="overallStatus" class="mt-2 font-semibold"></div>
+                    <div id="licenseType" class="mt-1 text-gray-600"></div>
+                </div>
+
+                <div class="flex justify-center mt-4">
+                    <button onclick="toggleJsonView()" 
+                            class="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700">
+                        View Complete JSON
+                    </button>
+                </div>
+
+                <div id="jsonView" class="hidden">
+                    <div class="bg-gray-900 text-gray-100 p-4 rounded-md overflow-x-auto">
+                        <pre id="jsonContent" class="text-sm"></pre>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4" id="analysisResults">
+                    <!-- Analysis sections will be inserted here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let lastAnalysisResult = null;
+
+        function formatJson(obj) {
+            return JSON.stringify(obj, null, 2)
+                .replace(/(".*?")/g, '<span class="json-string">$1</span>')
+                .replace(/\b(\d+\.?\d*)\b/g, '<span class="json-number">$1</span>')
+                .replace(/\b(true|false)\b/g, '<span class="json-boolean">$1</span>');
+        }
+
+        function toggleJsonView() {
+            const jsonView = document.getElementById('jsonView');
+            const jsonContent = document.getElementById('jsonContent');
+
+            if (jsonView.classList.contains('hidden')) {
+                jsonView.classList.remove('hidden');
+                jsonContent.innerHTML = formatJson(lastAnalysisResult);
+            } else {
+                jsonView.classList.add('hidden');
+            }
+        }
+
+        function displayAnalysisSection(rule) {
+            const container = document.getElementById('analysisResults');
+
+            const section = document.createElement('div');
+            section.className = 'p-4 bg-white rounded-lg shadow border';
+
+            const status = (rule.statusText || 'unknown').toLowerCase();
+            const statusClass = status === 'allowed' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+
+            section.innerHTML = `
+                <div class="flex justify-between items-start mb-3">
+                    <h3 class="font-semibold text-lg">${rule.name || 'Analysis'}</h3>
+                    <span class="px-3 py-1 rounded-full text-sm ${statusClass}">
+                        ${(rule.statusText || 'UNKNOWN').toUpperCase()}
+                    </span>
+                </div>
+                <div class="mb-2">
+                    <div class="text-sm text-gray-600 mb-1">Confidence Score: ${Math.round(rule.confidenceScore || 0)}%</div>
+                    <div class="h-2 bg-gray-200 rounded-full">
+                        <div class="h-full bg-blue-500 rounded-full" style="width: ${rule.confidenceScore || 0}%"></div>
+                    </div>
+                </div>
+                <div class="mt-3 text-sm text-gray-600">
+                    <strong>Details:</strong>
+                    <pre class="mt-1 whitespace-pre-wrap">${JSON.stringify(rule.details || {}, null, 2)}</pre>
+                </div>
+            `;
+
+            container.appendChild(section);
+        }
+
+        async function analyzeWebsite() {
+            const urlInput = document.getElementById('url');
+            const button = document.getElementById('analyzeButton');
+            const loadingDiv = document.getElementById('loading');
+            const resultDiv = document.getElementById('result');
+            const analysisResults = document.getElementById('analysisResults');
+
+            // Reset and show loading
+            resultDiv.classList.add('hidden');
+            loadingDiv.classList.remove('hidden');
+            button.disabled = true;
+            button.classList.add('opacity-50');
+            analysisResults.innerHTML = ''; // Clear previous results
+
+            try {
+                const url = urlInput.value.trim();
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ url: url })
+                });
+
+                const data = await response.json();
+                lastAnalysisResult = data;
+
+                if (!data || !data.Issuer || !data.Issuer.LicenseType) {
+                    throw new Error('Invalid response format');
+                }
+
+                const licenseType = data.Issuer.LicenseType;
+
+                // Update summary section
+                document.getElementById('primaryDomain').textContent = 
+                    `Domain: ${data.Issuer.primaryDomain || 'Unknown'}`;
+                document.getElementById('overallStatus').textContent = 
+                    `Scraping Status: ${licenseType.rightsToScrape ? 'ALLOWED' : 'RESTRICTED'}`;
+                document.getElementById('licenseType').textContent = 
+                    `License Type: ${licenseType.usageLicenseType || 'UNKNOWN'}`;
+
+                // Display each analysis section
+                if (licenseType.usageRulesExamined && Array.isArray(licenseType.usageRulesExamined)) {
+                    licenseType.usageRulesExamined.forEach(({ usageRuleExamined }) => {
+                        if (usageRuleExamined) {
+                            displayAnalysisSection(usageRuleExamined);
+                        }
+                    });
+                }
+
+            } catch (error) {
+                console.error('Error:', error);
+                analysisResults.innerHTML = `
+                    <div class="p-4 bg-red-100 text-red-800 rounded-lg">
+                        Error: ${error.message}
+                    </div>
+                `;
+            } finally {
+                loadingDiv.classList.add('hidden');
+                resultDiv.classList.remove('hidden');
+                button.disabled = false;
+                button.classList.remove('opacity-50');
+            }
+        }
+    </script>
+</body>
+</html>
